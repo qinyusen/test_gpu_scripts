@@ -1,0 +1,59 @@
+benchmark:
+  memory:
+    size_mb: 4096
+    iterations: 10
+    nvbandwidth_buffer_mb: 512
+    nvbandwidth_samples: 3
+  compute:
+    dtypes:
+      - fp32
+      - tf32
+      - fp16
+      - bf16
+      - fp8
+    matrix_size: 4096
+    warmup: 10
+    iterations: 100
+
+health:
+  temp_warning: 80
+  temp_critical: 90
+  power_limit: 700
+
+nccl:
+  min_bandwidth_gbps: 400
+  test_allreduce: true
+  test_alltoall: true
+  test_broadcast: true
+  test_reduce_scatter: false
+  test_allgather: false
+  test_sendrecv: false
+
+stress:
+  duration_sec: 60
+  use_doubles: false
+  use_tensor_cores: true
+  memory_pct: 90
+  gpus: all
+
+rdma:
+  min_bandwidth_gbps: 50
+  max_latency_us: 10
+  ib_iterations: 1000
+  msg_size: 65536
+  ib_device: null
+  ib_port: 1
+
+training:
+  model: gpt2
+  batch_size: 8
+  seq_length: 2048
+  num_steps: 50
+  dtype: bf16
+
+report:
+  output_dir: ./reports
+  format: json
+
+tools:
+  install_dir: /opt/h200-test-tools

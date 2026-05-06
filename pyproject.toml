@@ -1,0 +1,57 @@
+[project]
+name = "gpu-server-test-suite"
+version = "0.2.0"
+description = "GPU training server diagnostics & benchmarks (A100/A800/H100/H200/B200/B300)."
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+
+dependencies = [
+    "rich>=13.0",
+    "pyyaml>=6.0",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+# Install ONE matching your system CUDA version:
+#   uv sync --extra torch-cu118
+#   uv sync --extra torch-cu121
+#   uv sync --extra torch-cu124   (recommended for CUDA 12.x + Driver 535+)
+#   uv sync --extra torch-cu128   (for CUDA 12.8+ / Driver 570+)
+torch-cu118 = ["torch>=2.1.0"]
+torch-cu121 = ["torch>=2.1.0"]
+torch-cu124 = ["torch>=2.1.0"]
+torch-cu128 = ["torch>=2.1.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# PyTorch wheel indexes — one per CUDA version
+[[tool.uv.index]]
+name = "pytorch-cu118"
+url = "https://download.pytorch.org/whl/cu118"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+# Default: resolve torch from cu124 index (most broadly compatible with 535+ drivers)
+# To use a different CUDA version, override:
+#   uv pip install torch --index-url https://download.pytorch.org/whl/cu128
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["modules"]

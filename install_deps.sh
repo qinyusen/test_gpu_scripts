@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-INSTALL_DIR="${GPU_TOOLS_DIR:-${H200_TOOLS_DIR:-/opt/h200-test-tools}}"
+INSTALL_DIR="${GPU_TOOLS_DIR:-/opt/gpu-test-tools}"
 JOBS="${MAKE_JOBS:-$(nproc)}"
 VERBOSE="${VERBOSE:-0}"
 
@@ -203,8 +203,8 @@ print_summary() {
 
     echo ""
     echo " Usage:"
-    echo "   python3 h200_tester.py              # Interactive menu"
-    echo "   python3 h200_tester.py --test all    # Full suite"
+    echo "   python3 gpu_tester.py              # Interactive menu"
+    echo "   python3 gpu_tester.py --test all    # Full suite"
     echo ""
 }
 

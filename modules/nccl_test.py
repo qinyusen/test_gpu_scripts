@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
-from modules.gpu_specs import detect_gpu_type, get_gpu_specs
+from modules.gpu_specs import detect_gpu_type, get_gpu_specs, resolve_tools_dir
 
 TORCH_AVAILABLE = False
 try:
@@ -29,7 +29,7 @@ class NCCLTest:
         self.config = config
         self.console = Console()
         self.nccl_cfg = config.get("nccl", {})
-        self.tools_dir = config.get("tools", {}).get("install_dir", "/opt/h200-test-tools")
+        self.tools_dir = resolve_tools_dir(config)
         self.gpu_type = detect_gpu_type()
         self.specs = get_gpu_specs(self.gpu_type)
 

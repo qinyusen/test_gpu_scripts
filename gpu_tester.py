@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GPU Training Server Test Suite (H100/H200/B200/B300) - Main CLI Entry Point."""
+"""GPU Training Server Test Suite (A100/A800/H100/H200/B200/B300) - Main CLI Entry Point."""
 
 import argparse
 import json
@@ -26,7 +26,7 @@ from modules.training_sim import TrainingSim
 from modules.stress_test import StressTest
 from modules.rdma_test import RDMATest
 from modules.report import ReportGenerator
-from modules.gpu_specs import detect_gpu_type, get_gpu_specs, get_gpu_label, get_supported_gpus
+from modules.gpu_specs import detect_gpu_type, get_gpu_specs, get_gpu_label, get_supported_gpus, validate_driver_compatibility
 
 DEFAULT_CONFIG = {
     "benchmark": {
@@ -71,18 +71,18 @@ DEFAULT_CONFIG = {
         "dtype": "bf16",
     },
     "report": {"output_dir": "./reports", "format": "json"},
-    "tools": {"install_dir": "/opt/h200-test-tools"},
+    "tools": {"install_dir": "/opt/gpu-test-tools"},
 }
 
 BANNER = r"""
 [bold cyan]
-╔══════════════════════════════════════════════════╗
-║                                                  ║
-║       GPU Training Server Test Suite             ║
-║       Diagnostics & Benchmarking Tool            ║
-║       Supports: H100 / H200 / B200 / B300        ║
-║                                                  ║
-╚══════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════╗
+║                                                      ║
+║       GPU Training Server Test Suite                 ║
+║       Diagnostics & Benchmarking Tool                ║
+║       Supports: A100 / A800 / H100 / H200 / B200 / B300  ║
+║                                                      ║
+╚══════════════════════════════════════════════════════════╝
 [/bold cyan]
 """
 
@@ -120,6 +120,11 @@ def interactive_menu(config: dict):
         console.print(f"[bold green]Detected GPU: {gpu_label} ({gpu_type.upper()})[/bold green]\n")
     else:
         console.print("[yellow]GPU type could not be auto-detected. Using default thresholds.[/yellow]\n")
+
+    # Driver / CUDA compatibility check
+    compat_warnings = validate_driver_compatibility(gpu_type)
+    for w in compat_warnings:
+        console.print(f"[bold yellow]\u26a0 {w}[/bold yellow]")
 
     if not check_prerequisites(console):
         return
@@ -314,20 +319,20 @@ def _run_full_suite(config: dict, console: Console) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="GPU Training Server Test Suite (H100/H200/B200/B300)",
+        description="GPU Training Server Test Suite (A100/A800/H100/H200/B200/B300)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-   python h200_tester.py                        # Interactive menu
-   python h200_tester.py --gpu-type h200        # Override GPU type
-   python h200_tester.py --test gpu-info        # GPU info
-   python h200_tester.py --test health          # Health check
-   python h200_tester.py --test benchmark --type memory
-   python h200_tester.py --test benchmark --type compute --dtype fp16
-   python h200_tester.py --test nccl            # NCCL test
-   python h200_tester.py --test training        # Training sim
-   python h200_tester.py --test all             # Full suite
-   python h200_tester.py --report --format json --output report.json
+   python gpu_tester.py                        # Interactive menu
+   python gpu_tester.py --gpu-type a800        # Override GPU type
+   python gpu_tester.py --test gpu-info        # GPU info
+   python gpu_tester.py --test health          # Health check
+   python gpu_tester.py --test benchmark --type memory
+   python gpu_tester.py --test benchmark --type compute --dtype fp16
+   python gpu_tester.py --test nccl            # NCCL test
+   python gpu_tester.py --test training        # Training sim
+   python gpu_tester.py --test all             # Full suite
+   python gpu_tester.py --report --format json --output report.json
         """,
     )
     parser.add_argument("--test", choices=["gpu-info", "health", "benchmark", "nccl", "stress", "rdma", "training", "all"],
@@ -337,11 +342,15 @@ Examples:
                         help="Compute benchmark dtype (with --test benchmark --type compute)")
     parser.add_argument("--interactive", action="store_true", help="Force interactive mode")
     parser.add_argument("--report", action="store_true", help="Generate report from last results")
-    parser.add_argument("--format", choices=["json", "html"], default="json", help="Report format")
+    parser.add_argument("--format", choices=["json", "html", "md"], default="json", help="Report format")
     parser.add_argument("--output", default=None, help="Report output file path")
     parser.add_argument("--config", default=None, help="Path to config YAML file")
-    parser.add_argument("--gpu-type", choices=["auto", "h100", "h200", "b200", "b300"],
-                        default="auto", help="Override GPU type detection")
+    parser.add_argument(
+        "--gpu-type",
+        choices=["auto", "a100", "a800", "h100", "h200", "b200", "b300"],
+        default="auto",
+        help="Override GPU type detection",
+    )
 
     args = parser.parse_args()
     config = load_config()
@@ -358,6 +367,11 @@ Examples:
         config["gpu_type"] = detect_gpu_type()
 
     console = Console()
+
+    # Driver / CUDA compatibility check
+    compat_warnings = validate_driver_compatibility(config["gpu_type"])
+    for w in compat_warnings:
+        console.print(f"[bold yellow]\u26a0 {w}[/bold yellow]")
 
     # Handle --report standalone
     if args.report and not args.test:
@@ -396,17 +410,19 @@ Examples:
             result = bench.run()
             Benchmark.print_results(result)
         if args.report:
-            ReportGenerator(config).generate({"benchmark": result, "timestamp": datetime.now().isoformat()})
+            ReportGenerator(config).generate({"benchmark": result, "timestamp": datetime.now().isoformat()},
+                                             fmt=args.format, output=args.output)
     elif args.test == "all":
         results = _run_full_suite(config, console)
         if args.report:
-            ReportGenerator(config).generate(results)
+            ReportGenerator(config).generate(results, fmt=args.format, output=args.output)
         has_errors = any("error" in v for v in results.values() if isinstance(v, dict))
         sys.exit(1 if has_errors else 0)
     else:
         result = _run_test(test_map[args.test], config, console)
         if args.report and result:
-            ReportGenerator(config).generate({args.test: result, "timestamp": datetime.now().isoformat()})
+            ReportGenerator(config).generate({args.test: result, "timestamp": datetime.now().isoformat()},
+                                             fmt=args.format, output=args.output)
 
 
 if __name__ == "__main__":

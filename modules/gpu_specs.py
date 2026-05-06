@@ -1,10 +1,14 @@
-"""GPU specifications database for NVIDIA datacenter GPUs."""
+"""GPU specifications database for NVIDIA datacenter GPUs (A100/A800/H100/H200/B200/B300)."""
 
+import os
 import shutil
 import subprocess
+from typing import List, Optional
 
 # GPU name patterns -> internal key mapping
 GPU_NAME_PATTERNS = {
+    "A100": "a100",
+    "A800": "a800",
     "H100": "h100",
     "H200": "h200",
     "B200": "b200",
@@ -69,6 +73,44 @@ GPU_SPECS = {
         "pcie_gen": 5,
         "min_driver_version": "550",
         "min_cuda_version": "12.4",
+    },
+    "a100": {
+        "full_name": "NVIDIA A100 SXM",
+        "architecture": "Ampere",
+        "compute_capability": 8.0,
+        "hbm_capacity_gb": 80,
+        "hbm_type": "HBM2e",
+        "memory_bandwidth_gbps": 2039,      # GB/s (~2.0 TB/s)
+        "fp32_tflops": 19.5,
+        "tf32_tflops": 156,                 # dense
+        "fp16_tflops": 312,                 # dense
+        "bf16_tflops": 312,                 # dense
+        "fp8_tflops": 0,                    # Ampere has no FP8
+        "tdp_watts": 400,
+        "nvlink_gen": 3,
+        "nvlink_bandwidth_gbps": 600,       # bidirectional
+        "pcie_gen": 4,
+        "min_driver_version": "470",
+        "min_cuda_version": "11.0",
+    },
+    "a800": {
+        "full_name": "NVIDIA A800 SXM",
+        "architecture": "Ampere",
+        "compute_capability": 8.0,
+        "hbm_capacity_gb": 80,
+        "hbm_type": "HBM2e",
+        "memory_bandwidth_gbps": 2039,      # GB/s (~2.0 TB/s)
+        "fp32_tflops": 19.5,
+        "tf32_tflops": 156,                 # dense
+        "fp16_tflops": 312,                 # dense
+        "bf16_tflops": 312,                 # dense
+        "fp8_tflops": 0,                    # Ampere has no FP8
+        "tdp_watts": 400,
+        "nvlink_gen": 3,
+        "nvlink_bandwidth_gbps": 600,       # bidirectional (NVLink 3, limited vs A100)
+        "pcie_gen": 4,
+        "min_driver_version": "470",
+        "min_cuda_version": "11.0",
     },
     "b300": {
         "full_name": "NVIDIA B300 SXM (Blackwell Ultra)",
@@ -162,3 +204,92 @@ def get_gpu_label(gpu_type: str) -> str:
         # Strip the "NVIDIA " prefix for display
         return full.replace("NVIDIA ", "")
     return "Unknown GPU"
+
+
+# ---------------------------------------------------------------------------
+# Tools path resolution
+# ---------------------------------------------------------------------------
+
+def resolve_tools_dir(config: dict) -> str:
+    """Resolve tools installation directory with smart fallback.
+
+    Priority: GPU_TOOLS_DIR env > config value > /opt/gpu-test-tools > /tmp/gpu-test-tools
+    """
+    # 1. Env var override
+    env_dir = os.environ.get("GPU_TOOLS_DIR")
+    if env_dir:
+        return env_dir
+    # 2. Config value if explicitly set
+    cfg_dir = config.get("tools", {}).get("install_dir", "")
+    if cfg_dir:
+        return cfg_dir
+    # 3. /opt/gpu-test-tools if it already exists or /opt is writable
+    default = "/opt/gpu-test-tools"
+    if os.path.isdir(default) or os.access("/opt", os.W_OK):
+        return default
+    # 4. Fallback to /tmp
+    return "/tmp/gpu-test-tools"
+
+
+# ---------------------------------------------------------------------------
+# Driver / CUDA compatibility validation
+# ---------------------------------------------------------------------------
+
+def _query_nvidia_smi(field: str) -> Optional[str]:
+    """Query a single nvidia-smi field, return value string or None."""
+    nvidia_smi = shutil.which("nvidia-smi")
+    if not nvidia_smi:
+        return None
+    try:
+        r = subprocess.run(
+            [nvidia_smi, f"--query-gpu={field}", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip().splitlines()[0].strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    return None
+
+
+def _version_lt(actual: str, minimum: str) -> bool:
+    """Return True if actual version < minimum (numeric dotted comparison)."""
+    def to_tuple(v: str):
+        parts = []
+        for p in v.split("."):
+            try:
+                parts.append(int(p))
+            except ValueError:
+                break
+        return tuple(parts) if parts else (0,)
+    return to_tuple(actual) < to_tuple(minimum)
+
+
+def validate_driver_compatibility(gpu_type: str) -> List[str]:
+    """Check if current driver/CUDA meets minimum requirements for the detected GPU.
+
+    Returns a list of warning strings (empty if everything is fine).
+    """
+    specs = get_gpu_specs(gpu_type)
+    warnings: List[str] = []
+
+    min_driver = specs.get("min_driver_version", "")
+    min_cuda = specs.get("min_cuda_version", "")
+    if not min_driver and not min_cuda:
+        return warnings
+
+    actual_driver = _query_nvidia_smi("driver_version")
+    # nvidia-smi reports the highest CUDA version supported by the driver
+    actual_cuda = _query_nvidia_smi("cuda_version")
+
+    gpu_label = get_gpu_label(gpu_type)
+
+    if actual_driver and min_driver and _version_lt(actual_driver, min_driver):
+        warnings.append(
+            f"Driver {actual_driver} < minimum {min_driver} required for {gpu_label}"
+        )
+    if actual_cuda and min_cuda and _version_lt(actual_cuda, min_cuda):
+        warnings.append(
+            f"CUDA {actual_cuda} < minimum {min_cuda} required for {gpu_label}"
+        )
+    return warnings

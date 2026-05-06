@@ -1,4 +1,4 @@
-"""Hardware health monitoring module for NVIDIA datacenter GPUs (H100/H200/B200/B300)."""
+"""Hardware health monitoring module for NVIDIA datacenter GPUs (A100/A800/H100/H200/B200/B300)."""
 
 import subprocess
 import shutil
@@ -72,8 +72,8 @@ class HealthCheck:
         power_limits = query_lines("power.limit")
         ecc_single = query_lines("ecc.errors.single_bit.total.volatile")
         ecc_double = query_lines("ecc.errors.double_bit.total.volatile")
-        pcie_gens = query_lines("pcie_link.gen.current")
-        pcie_widths = query_lines("pcie_link.width.current")
+        pcie_gens = query_lines("pcie.link.gen.current")
+        pcie_widths = query_lines("pcie.link.width.current")
         clock_sms = query_lines("clocks.sm")
         clock_mems = query_lines("clocks.mem")
         persistence = query_lines("persistence_mode")

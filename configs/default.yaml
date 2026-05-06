@@ -1,4 +1,4 @@
-# GPU type: auto-detect or override to h100/h200/b200/b300
+# GPU type: auto-detect or override to a100/a800/h100/h200/b200/b300
 gpu_type: auto
 
 benchmark:
@@ -21,7 +21,7 @@ benchmark:
 health:
   temp_warning: 80
   temp_critical: 90
-  power_limit: null  # null = auto-detect from GPU TDP (H100/H200: 700W, B200: 1000W, B300: 1200W)
+  power_limit: null  # null = auto-detect from GPU TDP per gpu_specs.py
 
 nccl:
   min_bandwidth_gbps: null  # null = auto-detect (40% of GPU NVLink BW)
@@ -59,4 +59,4 @@ report:
   format: json
 
 tools:
-  install_dir: /opt/h200-test-tools
+  install_dir: /opt/gpu-test-tools

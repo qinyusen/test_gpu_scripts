@@ -1,4 +1,4 @@
-"""GPU information detection module for NVIDIA datacenter GPUs (H100/H200/B200/B300)."""
+"""GPU information detection module for NVIDIA datacenter GPUs (A100/A800/H100/H200/B200/B300)."""
 
 import subprocess
 import shutil
@@ -48,8 +48,8 @@ class GPUInfo:
         names = self._run_smi("name").split("\n") if self._run_smi("name") else []
         uuids = self._run_smi("uuid").split("\n") if self._run_smi("uuid") else []
         pcie_bus = self._run_smi("pci.bus_id").split("\n") if self._run_smi("pci.bus_id") else []
-        pcie_gen = self._run_smi("pcie_link.gen").split("\n") if self._run_smi("pcie_link.gen") else []
-        pcie_width = self._run_smi("pcie_link.width").split("\n") if self._run_smi("pcie_link.width") else []
+        pcie_gen = self._run_smi("pcie.link.gen.current").split("\n") if self._run_smi("pcie.link.gen.current") else []
+        pcie_width = self._run_smi("pcie.link.width.current").split("\n") if self._run_smi("pcie.link.width.current") else []
         vram_total = self._run_smi("memory.total").split("\n") if self._run_smi("memory.total") else []
         vram_used = self._run_smi("memory.used").split("\n") if self._run_smi("memory.used") else []
         vram_free = self._run_smi("memory.free").split("\n") if self._run_smi("memory.free") else []
@@ -166,7 +166,7 @@ class GPUInfo:
 
         for g in gpus:
             name = g["name"]
-            if any(k in name for k in ("H100", "H200", "B200", "B300")):
+            if any(k in name for k in ("A100", "A800", "H100", "H200", "B200", "B300")):
                 name = f"[bold green]{name}[/bold green]"
             vram = f"{g['vram_used_mb']}/{g['vram_total_mb']} MB"
             temp = f"{g['temperature']}°C"

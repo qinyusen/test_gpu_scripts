@@ -12,6 +12,8 @@ from rich.table import Table
 from rich.live import Live
 from rich.text import Text
 
+from modules.gpu_specs import resolve_tools_dir
+
 
 class StressTest:
 
@@ -19,7 +21,7 @@ class StressTest:
         self.config = config
         self.console = Console()
         self.stress_cfg = config.get("stress", {})
-        self.tools_dir = config.get("tools", {}).get("install_dir", "/opt/h200-test-tools")
+        self.tools_dir = resolve_tools_dir(config)
 
     def _find_gpu_burn(self) -> str:
         p = shutil.which("gpu_burn")
@@ -123,7 +125,8 @@ class StressTest:
             tensors = {}
             for i in range(gpu_count):
                 with torch.cuda.device(i):
-                    total_mem = torch.cuda.get_device_properties(i).total_mem
+                    props = torch.cuda.get_device_properties(i)
+                    total_mem = getattr(props, "total_memory", None) or getattr(props, "total_mem", 0)
                     alloc_size = int(total_mem * 0.9) // 4
                     tensors[i] = torch.randn(alloc_size, device=f"cuda:{i}", dtype=torch.float32)
 

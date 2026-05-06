@@ -1,6 +1,7 @@
 """GPU benchmark module — nvbandwidth + PyTorch compute throughput."""
 
 import json
+import os
 import shutil
 import subprocess
 import time
@@ -11,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
 
-from modules.gpu_specs import detect_gpu_type, get_gpu_specs, get_gpu_label
+from modules.gpu_specs import detect_gpu_type, get_gpu_specs, get_gpu_label, resolve_tools_dir
 
 TORCH_AVAILABLE = False
 try:
@@ -28,7 +29,7 @@ class Benchmark:
         self.config = config
         self.console = Console()
         self.bench_cfg = config.get("benchmark", {})
-        self.tools_dir = config.get("tools", {}).get("install_dir", "/opt/h200-test-tools")
+        self.tools_dir = resolve_tools_dir(config)
         self.gpu_type = detect_gpu_type()
         self.specs = get_gpu_specs(self.gpu_type)
         self.gpu_label = get_gpu_label(self.gpu_type)
@@ -40,12 +41,24 @@ class Benchmark:
         return results
 
     def _find_nvbandwidth(self) -> Optional[str]:
+        # 1. System PATH
         p = shutil.which("nvbandwidth")
         if p:
             return p
-        local = shutil.os.path.join(self.tools_dir, "nvbandwidth", "nvbandwidth")
-        if shutil.os.path.isfile(local) and shutil.os.access(local, shutil.os.X_OK):
+        # 2. tools_dir
+        local = os.path.join(self.tools_dir, "nvbandwidth", "nvbandwidth")
+        if os.path.isfile(local) and os.access(local, os.X_OK):
             return local
+        # 3. Common DCGM / system locations
+        extra_paths = [
+            "/usr/libexec/datacenter-gpu-manager-4/plugins/cuda12/nvbandwidth",
+            "/usr/libexec/datacenter-gpu-manager/plugins/cuda12/nvbandwidth",
+            "/usr/local/bin/nvbandwidth",
+            "/opt/nvidia/nvbandwidth/nvbandwidth",
+        ]
+        for ep in extra_paths:
+            if os.path.isfile(ep) and os.access(ep, os.X_OK):
+                return ep
         return None
 
     def run_memory_benchmark(self) -> dict:
@@ -140,7 +153,10 @@ class Benchmark:
         )
         h2d_bw = results_by_test.get("host_to_device_memcpy_read_ce", 0)
         d2h_bw = results_by_test.get("device_to_host_memcpy_write_ce", 0)
-        efficiency = (d2d_bw / self.specs["memory_bandwidth_gbps"]) * 100 if d2d_bw else 0
+        peak_bw = self.specs["memory_bandwidth_gbps"]
+        efficiency = (
+            (d2d_bw / peak_bw) * 100 if (d2d_bw and peak_bw) else 0
+        )
 
         return {
             "memory": {
@@ -216,7 +232,8 @@ class Benchmark:
                 progress.advance(task)
 
         best_d2d = max(v["d2d_gbps"] for v in bandwidth_by_size.values())
-        efficiency = (best_d2d / self.specs["memory_bandwidth_gbps"]) * 100
+        peak_bw = self.specs["memory_bandwidth_gbps"]
+        efficiency = (best_d2d / peak_bw) * 100 if peak_bw else 0.0
 
         return {
             "memory": {
@@ -266,6 +283,14 @@ class Benchmark:
 
             for dtype_name in configured_dtypes:
                 if dtype_name not in dtype_map:
+                    progress.advance(task)
+                    continue
+
+                # Skip FP8 if GPU architecture doesn't support it
+                if dtype_name == "fp8" and self.specs.get("fp8_tflops", 0) == 0:
+                    arch = self.specs.get("architecture", "unknown")
+                    results_by_dtype["fp8"] = f"skipped ({arch} does not support FP8)"
+                    self.console.print(f"[dim]  fp8: skipped - {arch} architecture has no FP8 support[/dim]")
                     progress.advance(task)
                     continue
 
@@ -321,7 +346,9 @@ class Benchmark:
         efficiency = {}
         for dt, achieved in results_by_dtype.items():
             if isinstance(achieved, (int, float)) and dt in dtype_map:
-                efficiency[dt] = round((achieved / dtype_map[dt][1]) * 100, 1)
+                peak_tp = dtype_map[dt][1]
+                if peak_tp:
+                    efficiency[dt] = round((achieved / peak_tp) * 100, 1)
 
         return {
             "compute": {
@@ -382,10 +409,13 @@ class Benchmark:
                 t2.add_column("D2D (GB/s)", justify="right")
                 for sz, vals in sorted(by_size.items(), key=lambda x: int(x[0])):
                     peak = mem["peak_bandwidth_gbps"]
-                    d2d_eff = (vals["d2d_gbps"] / peak) * 100
-                    ec = "green" if d2d_eff >= 80 else ("yellow" if d2d_eff >= 50 else "red")
-                    t2.add_row(sz, f"{vals['h2d_gbps']:.1f}", f"{vals['d2h_gbps']:.1f}",
-                               f"[{ec}]{vals['d2d_gbps']:.1f}[/{ec}]")
+                    if peak:
+                        d2d_eff = (vals["d2d_gbps"] / peak) * 100
+                        ec = "green" if d2d_eff >= 80 else ("yellow" if d2d_eff >= 50 else "red")
+                        d2d_cell = f"[{ec}]{vals['d2d_gbps']:.1f}[/{ec}]"
+                    else:
+                        d2d_cell = f"{vals['d2d_gbps']:.1f}"
+                    t2.add_row(sz, f"{vals['h2d_gbps']:.1f}", f"{vals['d2h_gbps']:.1f}", d2d_cell)
                 c.print(t2)
 
         if "compute" in results and "error" not in results["compute"]:

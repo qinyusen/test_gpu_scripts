@@ -1,4 +1,4 @@
-"""GPU information detection module for NVIDIA H200."""
+"""GPU information detection module for NVIDIA datacenter GPUs (H100/H200/B200/B300)."""
 
 import subprocess
 import shutil
@@ -10,12 +10,17 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
 
+from modules.gpu_specs import detect_gpu_type, get_gpu_specs, get_gpu_label
+
 
 class GPUInfo:
 
     def __init__(self, config: dict):
         self.config = config
         self.console = Console()
+        self.gpu_type = detect_gpu_type()
+        self.specs = get_gpu_specs(self.gpu_type)
+        self.gpu_label = get_gpu_label(self.gpu_type)
 
     def _run_smi(self, query: str, fmt: str = "csv,noheader,nounits") -> Optional[str]:
         if not shutil.which("nvidia-smi"):
@@ -116,6 +121,8 @@ class GPUInfo:
             "gpus": gpus,
             "topology": topology,
             "timestamp": datetime.now().isoformat(),
+            "detected_gpu_type": self.gpu_type,
+            "gpu_label": self.gpu_label,
         }
 
     def _get_topology(self) -> str:
@@ -139,6 +146,7 @@ class GPUInfo:
         c.print(f"  Driver Version : {results.get('driver_version', 'N/A')}")
         c.print(f"  CUDA Version   : {results.get('cuda_version', 'N/A')}")
         c.print(f"  GPU Count      : {results.get('gpu_count', 0)}")
+        c.print(f"  Detected GPU   : {results.get('gpu_label', 'Unknown')} ({results.get('detected_gpu_type', 'unknown')})")
         c.print(f"  Timestamp      : {results.get('timestamp', 'N/A')}")
 
         gpus = results.get("gpus", [])
@@ -158,7 +166,7 @@ class GPUInfo:
 
         for g in gpus:
             name = g["name"]
-            if "H200" in name:
+            if any(k in name for k in ("H100", "H200", "B200", "B300")):
                 name = f"[bold green]{name}[/bold green]"
             vram = f"{g['vram_used_mb']}/{g['vram_total_mb']} MB"
             temp = f"{g['temperature']}°C"

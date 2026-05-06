@@ -11,14 +11,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
 
-H200_SPECS = {
-    "memory_bandwidth_gbps": 989.0,
-    "fp32_tflops": 67.0,
-    "tf32_tflops": 989.0,
-    "fp16_tflops": 989.0,
-    "bf16_tflops": 989.0,
-    "fp8_tflops": 1979.0,
-}
+from modules.gpu_specs import detect_gpu_type, get_gpu_specs, get_gpu_label
 
 TORCH_AVAILABLE = False
 try:
@@ -36,6 +29,9 @@ class Benchmark:
         self.console = Console()
         self.bench_cfg = config.get("benchmark", {})
         self.tools_dir = config.get("tools", {}).get("install_dir", "/opt/h200-test-tools")
+        self.gpu_type = detect_gpu_type()
+        self.specs = get_gpu_specs(self.gpu_type)
+        self.gpu_label = get_gpu_label(self.gpu_type)
 
     def run(self) -> dict:
         results = {}
@@ -144,7 +140,7 @@ class Benchmark:
         )
         h2d_bw = results_by_test.get("host_to_device_memcpy_read_ce", 0)
         d2h_bw = results_by_test.get("device_to_host_memcpy_write_ce", 0)
-        efficiency = (d2d_bw / H200_SPECS["memory_bandwidth_gbps"]) * 100 if d2d_bw else 0
+        efficiency = (d2d_bw / self.specs["memory_bandwidth_gbps"]) * 100 if d2d_bw else 0
 
         return {
             "memory": {
@@ -152,7 +148,7 @@ class Benchmark:
                 "h2d_bandwidth_gbps": round(h2d_bw, 1),
                 "d2h_bandwidth_gbps": round(d2h_bw, 1),
                 "d2d_bandwidth_gbps": round(d2d_bw, 1),
-                "peak_bandwidth_gbps": H200_SPECS["memory_bandwidth_gbps"],
+                "peak_bandwidth_gbps": self.specs["memory_bandwidth_gbps"],
                 "efficiency_pct": round(efficiency, 1),
                 "results_by_test": results_by_test,
                 "per_gpu": per_gpu_d2d,
@@ -220,7 +216,7 @@ class Benchmark:
                 progress.advance(task)
 
         best_d2d = max(v["d2d_gbps"] for v in bandwidth_by_size.values())
-        efficiency = (best_d2d / H200_SPECS["memory_bandwidth_gbps"]) * 100
+        efficiency = (best_d2d / self.specs["memory_bandwidth_gbps"]) * 100
 
         return {
             "memory": {
@@ -228,7 +224,7 @@ class Benchmark:
                 "h2d_bandwidth_gbps": round(max(v["h2d_gbps"] for v in bandwidth_by_size.values()), 1),
                 "d2h_bandwidth_gbps": round(max(v["d2h_gbps"] for v in bandwidth_by_size.values()), 1),
                 "d2d_bandwidth_gbps": round(best_d2d, 1),
-                "peak_bandwidth_gbps": H200_SPECS["memory_bandwidth_gbps"],
+                "peak_bandwidth_gbps": self.specs["memory_bandwidth_gbps"],
                 "efficiency_pct": round(efficiency, 1),
                 "test_sizes_mb": test_sizes_mb,
                 "bandwidth_by_size": bandwidth_by_size,
@@ -251,11 +247,11 @@ class Benchmark:
         self.console.print(f"[cyan]Compute Benchmark - {gpu_count} GPU(s)[/cyan]")
 
         dtype_map = {
-            "fp32": (torch.float32, H200_SPECS["fp32_tflops"]),
-            "tf32": ("tf32", H200_SPECS["tf32_tflops"]),
-            "fp16": (torch.float16, H200_SPECS["fp16_tflops"]),
-            "bf16": (torch.bfloat16, H200_SPECS["bf16_tflops"]),
-            "fp8": (torch.float8_e4m3fn, H200_SPECS["fp8_tflops"]),
+            "fp32": (torch.float32, self.specs["fp32_tflops"]),
+            "tf32": ("tf32", self.specs["tf32_tflops"]),
+            "fp16": (torch.float16, self.specs["fp16_tflops"]),
+            "bf16": (torch.bfloat16, self.specs["bf16_tflops"]),
+            "fp8": (torch.float8_e4m3fn, self.specs["fp8_tflops"]),
         }
 
         results_by_dtype = {}
@@ -351,7 +347,7 @@ class Benchmark:
             table = Table(box=None, padding=(0, 1))
             table.add_column("Metric", style="bold")
             table.add_column("Value", justify="right")
-            table.add_column("Peak (H200)", justify="right")
+            table.add_column("Peak", justify="right")
             table.add_column("Efficiency", justify="right")
 
             for label, achieved, peak in [
@@ -385,7 +381,7 @@ class Benchmark:
                 t2.add_column("D2H (GB/s)", justify="right")
                 t2.add_column("D2D (GB/s)", justify="right")
                 for sz, vals in sorted(by_size.items(), key=lambda x: int(x[0])):
-                    peak = H200_SPECS["memory_bandwidth_gbps"]
+                    peak = mem["peak_bandwidth_gbps"]
                     d2d_eff = (vals["d2d_gbps"] / peak) * 100
                     ec = "green" if d2d_eff >= 80 else ("yellow" if d2d_eff >= 50 else "red")
                     t2.add_row(sz, f"{vals['h2d_gbps']:.1f}", f"{vals['d2h_gbps']:.1f}",
@@ -399,7 +395,7 @@ class Benchmark:
             table = Table(box=None, padding=(0, 1))
             table.add_column("DType", style="bold")
             table.add_column("Achieved (TFLOPS)", justify="right")
-            table.add_column("Peak (H200)", justify="right")
+            table.add_column("Peak", justify="right")
             table.add_column("Efficiency", justify="right")
 
             peak = comp.get("peak_tflops", {})

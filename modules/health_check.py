@@ -1,4 +1,4 @@
-"""Hardware health monitoring module for NVIDIA H200."""
+"""Hardware health monitoring module for NVIDIA datacenter GPUs (H100/H200/B200/B300)."""
 
 import subprocess
 import shutil
@@ -11,6 +11,8 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
 
+from modules.gpu_specs import detect_gpu_type, get_gpu_specs
+
 
 class HealthCheck:
 
@@ -18,6 +20,8 @@ class HealthCheck:
         self.config = config
         self.console = Console()
         self.health_cfg = config.get("health", {})
+        self.gpu_type = detect_gpu_type()
+        self.specs = get_gpu_specs(self.gpu_type)
 
     def _run_smi(self, query: str) -> Optional[str]:
         if not shutil.which("nvidia-smi"):
@@ -79,7 +83,7 @@ class HealthCheck:
 
         temp_warn = self.health_cfg.get("temp_warning", 80)
         temp_crit = self.health_cfg.get("temp_critical", 90)
-        power_lim = self.health_cfg.get("power_limit", 700)
+        power_lim = self.health_cfg.get("power_limit", self.specs.get("tdp_watts", 700))
 
         gpu_health = []
         overall_pass = True
@@ -150,6 +154,7 @@ class HealthCheck:
             "gpu_health": gpu_health,
             "system_health": system_health,
             "timestamp": datetime.now().isoformat(),
+            "detected_gpu_type": self.gpu_type,
         }
 
     def _check_system(self) -> dict:

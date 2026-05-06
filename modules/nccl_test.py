@@ -12,6 +12,8 @@ from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
+from modules.gpu_specs import detect_gpu_type, get_gpu_specs
+
 TORCH_AVAILABLE = False
 try:
     import torch
@@ -28,6 +30,8 @@ class NCCLTest:
         self.console = Console()
         self.nccl_cfg = config.get("nccl", {})
         self.tools_dir = config.get("tools", {}).get("install_dir", "/opt/h200-test-tools")
+        self.gpu_type = detect_gpu_type()
+        self.specs = get_gpu_specs(self.gpu_type)
 
     def _find_nccl_test(self, name: str) -> Optional[str]:
         p = shutil.which(name)
@@ -81,7 +85,8 @@ class NCCLTest:
             tests.append(("sendrecv_perf", "SendRecv"))
 
         results = {}
-        min_bw = self.nccl_cfg.get("min_bandwidth_gbps", 400)
+        default_min_bw = self.specs.get("nvlink_bandwidth_gbps", 900) * 0.4
+        min_bw = self.nccl_cfg.get("min_bandwidth_gbps", round(default_min_bw))
 
         with Progress(
             SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
@@ -109,6 +114,7 @@ class NCCLTest:
             "tests": results,
             "gpu_count": gpu_count,
             "timestamp": datetime.now().isoformat(),
+            "detected_gpu_type": self.gpu_type,
         }
 
     def _run_one_nccl_test(self, binary_name: str, label: str,
@@ -187,7 +193,8 @@ class NCCLTest:
 
     def _run_torchrun_fallback(self, gpu_count: int) -> dict:
         self.console.print("[cyan]Using torchrun fallback for NCCL test[/cyan]")
-        min_bw = self.nccl_cfg.get("min_bandwidth_gbps", 400)
+        default_min_bw = self.specs.get("nvlink_bandwidth_gbps", 900) * 0.4
+        min_bw = self.nccl_cfg.get("min_bandwidth_gbps", round(default_min_bw))
         size_mb = 64
         elements = size_mb * 1024 * 1024 // 4
         iters = 20

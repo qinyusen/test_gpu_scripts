@@ -1,7 +1,10 @@
-# H200 Training Server Test Suite
+# GPU Training Server Test Suite
 
-面向 NVIDIA H200 训练服务器的自动化测试与基准测试工具集。
+面向 NVIDIA 数据中心 GPU（H100 / H200 / B200 / B300）训练服务器的自动化测试与基准测试工具集。
 涵盖硬件检测、健康诊断、带宽基准、计算吞吐、多卡通信、压力稳定性、RDMA 网络和训练模拟。
+
+> **支持 GPU 架构：** Hopper (H100/H200) · Blackwell (B200/B300)
+> 系统自动检测 GPU 型号并使用对应的规格参数进行基准对比。
 
 ---
 
@@ -29,6 +32,7 @@ servertest/
 ├── configs/
 │   └── default.yaml            # 默认配置
 ├── modules/
+│   ├── gpu_specs.py            # GPU 规格数据库 (H100/H200/B200/B300)
 │   ├── gpu_info.py             # GPU 检测 & 信息
 │   ├── health_check.py         # 健康诊断
 │   ├── benchmark.py            # 内存带宽 + 计算吞吐
@@ -60,7 +64,7 @@ servertest/
 
 | 项目 | 要求 |
 |---|---|
-| GPU | ≥ 2 张 NVIDIA H200 SXM5 |
+| GPU | ≥ 1 张 NVIDIA 数据中心 GPU（H100/H200/B200/B300 SXM） |
 | MPI | OpenMPI ≥ 4.1 |
 | RDMA | Mellanox ConnectX-7 / BlueField |
 | nvbandwidth | 源码编译安装 |
@@ -74,17 +78,21 @@ servertest/
 ## 快速开始
 
 ```bash
-# 1. 克隆/复制项目到服务器
-scp -r servertest/ user@h200-server:~/
+# 1. 克隆项目到服务器
+git clone git@github.com:qinyusen/test_gpu_scripts.git
+cd test_gpu_scripts
 
 # 2. 安装依赖（需要 root）
 sudo bash install_deps.sh
 
-# 3. 运行交互式测试
+# 3. 运行交互式测试（自动检测 GPU 型号）
 python3 h200_tester.py
 
 # 4. 或一键全量测试
 python3 h200_tester.py --test all
+
+# 5. 手动指定 GPU 型号（跳过自动检测）
+python3 h200_tester.py --gpu-type b200 --test all
 ```
 
 ---
@@ -99,11 +107,13 @@ sudo bash install_deps.sh
 
 该脚本自动完成：
 1. 安装系统包（build-essential, openmpi, infiniband-diags, perftest）
-2. 源码编译 nvbandwidth → `/opt/h200-test-tools/nvbandwidth/`
-3. 源码编译 nccl-tests → `/opt/h200-test-tools/nccl-tests/build/`
-4. 源码编译 gpu-burn → `/opt/h200-test-tools/gpu-burn/`
+2. 源码编译 nvbandwidth → `$INSTALL_DIR/nvbandwidth/`
+3. 源码编译 nccl-tests → `$INSTALL_DIR/nccl-tests/build/`
+4. 源码编译 gpu-burn → `$INSTALL_DIR/gpu-burn/`
 5. 安装 Python 包（rich, pyyaml）
 6. 检查 DCGM 和 RDMA 工具状态
+
+默认安装目录 `/opt/h200-test-tools`，可通过环境变量自定义。
 
 ### 自定义安装目录
 
@@ -114,19 +124,21 @@ sudo H200_TOOLS_DIR=/data/tools bash install_deps.sh
 ### 手动安装单项
 
 ```bash
+TOOLS=/opt/h200-test-tools
+
 # nvbandwidth
-git clone https://github.com/NVIDIA/nvbandwidth.git /opt/h200-test-tools/nvbandwidth
-cd /opt/h200-test-tools/nvbandwidth && mkdir build && cd build
+git clone https://github.com/NVIDIA/nvbandwidth.git $TOOLS/nvbandwidth
+cd $TOOLS/nvbandwidth && mkdir build && cd build
 cmake .. && make -j$(nproc)
 
 # nccl-tests
-git clone https://github.com/NVIDIA/nccl-tests.git /opt/h200-test-tools/nccl-tests
-cd /opt/h200-test-tools/nccl-tests
+git clone https://github.com/NVIDIA/nccl-tests.git $TOOLS/nccl-tests
+cd $TOOLS/nccl-tests
 make MPI=1 MPI_HOME=/usr CUDA_HOME=/usr/local/cuda -j$(nproc)
 
 # gpu-burn
-git clone https://github.com/wilicc/gpu-burn.git /opt/h200-test-tools/gpu-burn
-cd /opt/h200-test-tools/gpu-burn && make
+git clone https://github.com/wilicc/gpu-burn.git $TOOLS/gpu-burn
+cd $TOOLS/gpu-burn && make
 ```
 
 ---
@@ -171,9 +183,33 @@ python3 h200_tester.py --test training
 # 全量测试
 python3 h200_tester.py --test all
 
+# GPU 型号控制
+python3 h200_tester.py --gpu-type auto --test all       # 自动检测（默认）
+python3 h200_tester.py --gpu-type h200 --test all        # 强制指定 H200
+python3 h200_tester.py --gpu-type b300 --test benchmark  # 强制指定 B300
+
 # 指定自定义配置
 python3 h200_tester.py --config /path/to/config.yaml --test all
 ```
+
+### GPU 自动检测
+
+系统启动时自动运行 `nvidia-smi --query-gpu=name` 检测 GPU 型号，匹配规则：
+
+| GPU 名称关键词 | 识别为 | 使用规格 |
+|---|---|---|
+| `H100` | H100 SXM5 | Hopper, 80GB HBM3, 3.4 TB/s |
+| `H200` | H200 SXM | Hopper, 141GB HBM3e, 4.8 TB/s |
+| `B200` | B200 SXM | Blackwell, 180GB HBM3e, 8 TB/s |
+| `B300` | B300 SXM | Blackwell Ultra, 288GB HBM3e, 8 TB/s |
+
+检测后自动选择对应的：
+- **峰值 TFLOPS**（用于计算吞吐效率百分比）
+- **内存带宽峰值**（用于带宽效率百分比）
+- **TDP 功耗**（用于健康检查功耗阈值）
+- **NVLink 带宽**（用于 NCCL 测试最低带宽阈值）
+
+如果检测失败或不匹配，所有峰值显示为 `N/A`，测试仍可正常运行。
 
 ---
 
@@ -185,7 +221,7 @@ python3 h200_tester.py --config /path/to/config.yaml --test all
 
 | 指标 | 说明 |
 |---|---|
-| 型号 | 确认是否为 H200（vs H100/A100） |
+| 型号 | 自动检测并确认 GPU 型号（H100/H200/B200/B300） |
 | VRAM | 总量 / 已用 / 空闲 |
 | 温度 | 实时温度 |
 | 功耗 | 实时功耗 / 功耗上限 |
@@ -197,12 +233,12 @@ python3 h200_tester.py --config /path/to/config.yaml --test all
 
 ### 2. Health Check（健康诊断）
 
-全面检查 GPU 和系统健康状态，输出 PASS/WARN/FAIL 评级。
+全面检查 GPU 和系统健康状态，输出 PASS/WARN/FAIL 评级。功耗上限根据 GPU 型号自动设定。
 
 | 检查项 | 判定标准 |
 |---|---|
 | 温度 | < 80°C PASS, < 90°C WARN, ≥ 90°C FAIL |
-| 功耗 | ≤ 功耗上限 ×1.05 PASS |
+| 功耗 | ≤ 功耗上限 ×1.05 PASS（上限自动匹配 GPU TDP） |
 | ECC 单比特 | ≤ 100 WARN, > 100 WARN |
 | ECC 双比特 | = 0 PASS, > 0 FAIL |
 | PCIe 链路 | ≥ Gen4 x8 PASS |
@@ -226,21 +262,21 @@ python3 h200_tester.py --config /path/to/config.yaml --test all
 - `device_to_device_memcpy_read_ce` — D2D 读带宽
 - `device_to_device_bidirectional_sm` — D2D 双向带宽
 
-**H200 参考值：** D2D 峰值 989 GB/s（HBM3e）
+**GPU 参考值（D2D 峰值带宽）：** H100: 3,400 GB/s | H200: 4,800 GB/s | B200/B300: 8,000 GB/s
 
 **效率评级：** ≥ 80% 绿色, 50-80% 黄色, < 50% 红色
 
 ### 4. Compute Benchmark（计算吞吐）
 
-使用 PyTorch matmul 测试各精度 GEMM 吞吐量。
+使用 PyTorch matmul 测试各精度 GEMM 吞吐量。峰值 TFLOPS 根据 GPU 型号自动匹配。
 
-| 精度 | H200 峰值 TFLOPS |
-|---|---|
-| FP32 | 67 |
-| TF32 | 989 |
-| FP16 | 989 |
-| BF16 | 989 |
-| FP8 | 1,979 |
+| 精度 | H100/H200 峰值 | B200 峰值 | B300 峰值 |
+|---|---|---|---|
+| FP32 | 67 TFLOPS | 90 TFLOPS | 125 TFLOPS |
+| TF32 | 495 TFLOPS | 1,125 TFLOPS | 1,750 TFLOPS |
+| FP16 | 990 TFLOPS | 2,250 TFLOPS | 3,500 TFLOPS |
+| BF16 | 990 TFLOPS | 2,250 TFLOPS | 3,500 TFLOPS |
+| FP8 | 1,979 TFLOPS | 4,500 TFLOPS | 7,000 TFLOPS |
 
 默认配置：4096×4096 矩阵，10 次 warmup，100 次迭代。
 
@@ -259,7 +295,7 @@ python3 h200_tester.py --config /path/to/config.yaml --test all
 
 默认测试数据量范围 8B ~ 256MB，5 次 warmup，20 次迭代。
 
-**H200 NVLink 参考带宽：** ≥ 400 GB/s（bus bandwidth）
+**NVLink 参考带宽：** H100/H200 ≥ 360 GB/s | B200/B300 ≥ 720 GB/s（40% NVLink 峰值）
 
 ### 6. GPU Stress Test（压力测试）
 
@@ -302,6 +338,9 @@ python3 h200_tester.py --config /path/to/config.yaml --test all
 配置文件路径：`configs/default.yaml`
 
 ```yaml
+# GPU type: auto-detect or override to h100/h200/b200/b300
+gpu_type: auto
+
 tools:
   install_dir: /opt/h200-test-tools    # 三方工具安装目录
 
@@ -318,10 +357,10 @@ benchmark:
 health:
   temp_warning: 80                      # 温度警告阈值 °C
   temp_critical: 90                     # 温度严重阈值 °C
-  power_limit: 700                      # 功耗上限 W
+  power_limit: null                     # null = 自动匹配 GPU TDP
 
 nccl:
-  min_bandwidth_gbps: 400              # NCCL 最低可接受带宽
+  min_bandwidth_gbps: null              # null = 40% GPU NVLink 峰值
   test_allreduce: true
   test_alltoall: true
   test_broadcast: true
@@ -353,7 +392,7 @@ report:
 
 ### SOP-1: 新服务器到货验收
 
-**适用场景：** H200 服务器首次上架，需要确认硬件完整可用。
+**适用场景：** GPU 服务器首次上架，需要确认硬件完整可用。支持 H100/H200/B200/B300。
 
 ```
 步骤 1: 环境准备
@@ -364,9 +403,10 @@ report:
 
 步骤 2: GPU 信息核对
 ├── python3 h200_tester.py --test gpu-info
+├── 确认: 系统自动检测到 GPU 型号
 ├── 核对: GPU 数量是否与采购规格一致
-├── 核对: 型号确为 NVIDIA H200
-├── 核对: VRAM 总量 ≈ 141056 MB
+├── 核对: 型号与预期一致（H100/H200/B200/B300）
+├── 核对: VRAM 总量符合规格（H100: 80GB, H200: 141GB, B200: 180GB, B300: 288GB）
 ├── 核对: PCIe Gen5 x16
 └── 核对: NVLink 拓扑显示正确
 
@@ -380,19 +420,17 @@ report:
 
 步骤 4: 内存带宽基准
 ├── python3 h200_tester.py --test benchmark --type memory
-├── 确认: D2D 带宽 ≥ 940 GB/s（>95% 峰值）
-└── 低于 800 GB/s: 检查散热/ECC/固件版本
+├── 确认: D2D 带宽效率 ≥ 90%（自动与 GPU 峰值对比）
+└── 低于 80%: 检查散热/ECC/固件版本
 
 步骤 5: 计算吞吐基准
 ├── python3 h200_tester.py --test benchmark --type compute
-├── 确认: BF16 ≥ 790 TFLOPS（>80% 峰值）
-├── 确认: FP8 ≥ 1580 TFLOPS（>80% 峰值）
+├── 确认: 各精度 TFLOPS ≥ 峰值的 80%（自动与 GPU 规格对比）
 └── 异常低: 检查功耗限制、时钟频率、驱动版本
 
 步骤 6: NCCL 多卡通信
 ├── python3 h200_tester.py --test nccl
-├── 确认: AllReduce bus bandwidth ≥ 400 GB/s
-├── 确认: AllToAll bus bandwidth ≥ 400 GB/s
+├── 确认: AllReduce/AllToAll bus bandwidth ≥ 最低阈值（自动根据 NVLink 带宽计算）
 └── 异常低: 检查 NVLink 连接、NVSwitch 状态
 
 步骤 7: 压力稳定性
@@ -410,9 +448,9 @@ report:
 
 **验收通过标准：**
 - 8 项测试全部无 FAIL
-- 内存带宽效率 ≥ 90%
+- 内存带宽效率 ≥ 90%（自动与检测到的 GPU 峰值对比）
 - 计算吞吐效率 ≥ 80%
-- NCCL 带宽 ≥ 400 GB/s
+- NCCL 带宽 ≥ 最低阈值（自动计算）
 - 压力测试 10 分钟无错误
 
 ---
@@ -441,7 +479,7 @@ report:
 
 ### SOP-3: 多节点集群验收
 
-**适用场景：** 多台 H200 服务器组成训练集群，验证节点间通信。
+**适用场景：** 多台 GPU 服务器组成训练集群，验证节点间通信。
 
 ```
 前置条件: 每台单节点已通过 SOP-1
@@ -506,7 +544,7 @@ report:
 
 步骤 4: 固件/驱动排查
 ├── nvidia-smi -q | head -20  (查看驱动/CUDA 版本)
-├── 确认驱动 ≥ 535
+├── 确认驱动版本满足要求（Hopper ≥ 535, Blackwell ≥ 550）
 ├── 确认固件版本与集群一致
 └── 必要时更新: apt upgrade nvidia-driver-*
 ```
@@ -550,7 +588,7 @@ report:
 
 ```bash
 python3 h200_tester.py --test all
-# 报告位置: ./reports/h200_report_<timestamp>.json
+# 报告位置: ./reports/gpu_report_<timestamp>.json
 ```
 
 包含所有测试的完整数据，可用于自动化分析。
@@ -574,7 +612,7 @@ python3 h200_tester.py --test all --format html --output report.html
 
 | 问题 | 原因 | 解决方案 |
 |---|---|---|
-| `nvidia-smi not found` | 驱动未安装 | 安装 NVIDIA 驱动 ≥ 535 |
+| `nvidia-smi not found` | 驱动未安装 | 安装 NVIDIA 驱动（Hopper ≥ 535, Blackwell ≥ 550） |
 | `nvbandwidth not found` | 未编译安装 | 运行 `install_deps.sh` 或手动编译 |
 | `nccl-tests not found` | 未编译安装 | 运行 `install_deps.sh`，确认 CUDA_HOME 正确 |
 | `mpirun not found` | MPI 未安装 | `apt install openmpi-bin libopenmpi-dev` |
@@ -589,20 +627,22 @@ python3 h200_tester.py --test all --format html --output report.html
 
 ---
 
-## H200 关键规格参考
+## GPU 关键规格参考
 
-| 参数 | 规格 |
-|---|---|
-| GPU 架构 | Hopper (H200 SXM5) |
-| 计算能力 | 9.0 |
-| HBM3e 容量 | 141 GB |
-| 内存带宽 | 989 GB/s |
-| TDP | 700W（可配置 400W） |
-| FP32 | 67 TFLOPS |
-| TF32 | 989 TFLOPS |
-| FP16 / BF16 | 989 TFLOPS |
-| FP8 | 1,979 TFLOPS |
-| NVLink | 第 4 代，900 GB/s 双向 |
-| PCIe | Gen5 x16 |
-| 驱动最低版本 | 535 |
-| CUDA 最低版本 | 12.1 |
+系统自动检测 GPU 型号，以下为各型号参考规格（dense TFLOPS）：
+
+| 参数 | H100 SXM5 | H200 SXM | B200 SXM | B300 SXM |
+|---|---|---|---|---|
+| 架构 | Hopper | Hopper | Blackwell | Blackwell Ultra |
+| 计算能力 | 9.0 | 9.0 | 10.0 | 10.0 |
+| HBM 容量 | 80 GB (HBM3) | 141 GB (HBM3e) | 180 GB (HBM3e) | 288 GB (HBM3e) |
+| 内存带宽 | 3,400 GB/s | 4,800 GB/s | 8,000 GB/s | 8,000 GB/s |
+| TDP | 700W | 700W | 1,000W | 1,200W |
+| FP32 | 67 TFLOPS | 67 TFLOPS | 90 TFLOPS | 125 TFLOPS |
+| TF32 (dense) | 495 TFLOPS | 495 TFLOPS | 1,125 TFLOPS | 1,750 TFLOPS |
+| FP16/BF16 (dense) | 990 TFLOPS | 990 TFLOPS | 2,250 TFLOPS | 3,500 TFLOPS |
+| FP8 (dense) | 1,979 TFLOPS | 1,979 TFLOPS | 4,500 TFLOPS | 7,000 TFLOPS |
+| NVLink | 第 4 代, 900 GB/s | 第 4 代, 900 GB/s | 第 5 代, 1,800 GB/s | 第 5 代, 1,800 GB/s |
+| PCIe | Gen5 x16 | Gen5 x16 | Gen5 x16 | Gen5 x16 |
+| 最低驱动 | 535 | 535 | 550 | 550 |
+| 最低 CUDA | 12.1 | 12.1 | 12.4 | 12.4 |

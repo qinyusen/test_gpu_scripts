@@ -72,13 +72,17 @@ class HealthCheck:
         power_limits = query_lines("power.limit")
         ecc_single = query_lines("ecc.errors.single_bit.total.volatile")
         ecc_double = query_lines("ecc.errors.double_bit.total.volatile")
-        pcie_gens = query_lines("pcie_link.gen.current")
-        pcie_widths = query_lines("pcie_link.width.current")
+        pcie_gens = query_lines("pcie.link.gen.current")
+        pcie_widths = query_lines("pcie.link.width.current")
         clock_sms = query_lines("clocks.sm")
         clock_mems = query_lines("clocks.mem")
         persistence = query_lines("persistence_mode")
 
-        throttling_raw = query_lines("clocks_throttle_reasons.active")
+        throttle_hw_slowdown = query_lines("clocks_throttle_reasons.hw_slowdown")
+        throttle_sw_power_cap = query_lines("clocks_throttle_reasons.sw_power_cap")
+        throttle_sw_thermal = query_lines("clocks_throttle_reasons.sw_thermal_slowdown")
+        throttle_hw_thermal = query_lines("clocks_throttle_reasons.hw_thermal_slowdown")
+        throttle_sync_boost = query_lines("clocks_throttle_reasons.sync_boost")
         mig_modes = query_lines("mig.mode.current")
 
         temp_warn = self.health_cfg.get("temp_warning", 80)
@@ -124,11 +128,22 @@ class HealthCheck:
             mm = self._safe_int(clock_mems[i] if i < len(clock_mems) else 0)
             checks["clock_speed"] = {"sm": sm, "mem": mm, "status": "PASS" if sm > 0 and mm > 0 else "WARN"}
 
-            throttle_val = throttling_raw[i] if i < len(throttling_raw) else ""
-            throttle_active = throttle_val not in ("", "None", "Active", "N/A")
+            throttle_reasons = []
+            throttle_fields = {
+                "hw_slowdown": throttle_hw_slowdown,
+                "sw_power_cap": throttle_sw_power_cap,
+                "sw_thermal_slowdown": throttle_sw_thermal,
+                "hw_thermal_slowdown": throttle_hw_thermal,
+                "sync_boost": throttle_sync_boost,
+            }
+            for reason, values in throttle_fields.items():
+                val = values[i] if i < len(values) else ""
+                if val == "Active":
+                    throttle_reasons.append(reason)
+            throttle_active = bool(throttle_reasons)
             if throttle_active:
                 overall_pass = False
-            checks["throttling"] = {"status": "FAIL" if throttle_active else "PASS", "reasons": [throttle_val] if throttle_active else []}
+            checks["throttling"] = {"status": "FAIL" if throttle_active else "PASS", "reasons": throttle_reasons}
 
             pers_val = persistence[i] if i < len(persistence) else ""
             pers_enabled = pers_val == "Enabled"
@@ -161,8 +176,11 @@ class HealthCheck:
         persistd = shutil.which("nvidia-persistenced") is not None
         persistd_running = False
         if persistd:
-            r = self._run_cmd(["pgrep", "-x", "nvidia-persistenced"])
-            persistd_running = r is not None
+            service_state = self._run_cmd(["systemctl", "is-active", "nvidia-persistenced.service"])
+            persistd_running = service_state == "active"
+            if not persistd_running:
+                r = self._run_cmd(["pgrep", "-f", "nvidia-persistenced"])
+                persistd_running = r is not None
 
         hugepages = 0
         hp_path = "/sys/kernel/mm/transparent_hugepage/hpage_pmd_size"

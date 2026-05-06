@@ -1,5 +1,6 @@
 """GPU information detection module for NVIDIA datacenter GPUs (H100/H200/B200/B300)."""
 
+import re
 import subprocess
 import shutil
 from datetime import datetime
@@ -34,6 +35,21 @@ class GPUInfo:
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return None
 
+    def _get_cuda_version(self) -> str:
+        try:
+            r = subprocess.run(
+                ["nvidia-smi"],
+                capture_output=True, text=True, timeout=15,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return "N/A"
+
+        if r.returncode != 0:
+            return "N/A"
+
+        match = re.search(r"CUDA Version:\s*([0-9.]+)", r.stdout)
+        return match.group(1) if match else "N/A"
+
     def run(self) -> dict:
         if not shutil.which("nvidia-smi"):
             self.console.print("[bold red]nvidia-smi not found![/bold red]")
@@ -48,8 +64,8 @@ class GPUInfo:
         names = self._run_smi("name").split("\n") if self._run_smi("name") else []
         uuids = self._run_smi("uuid").split("\n") if self._run_smi("uuid") else []
         pcie_bus = self._run_smi("pci.bus_id").split("\n") if self._run_smi("pci.bus_id") else []
-        pcie_gen = self._run_smi("pcie_link.gen").split("\n") if self._run_smi("pcie_link.gen") else []
-        pcie_width = self._run_smi("pcie_link.width").split("\n") if self._run_smi("pcie_link.width") else []
+        pcie_gen = self._run_smi("pcie.link.gen.current").split("\n") if self._run_smi("pcie.link.gen.current") else []
+        pcie_width = self._run_smi("pcie.link.width.current").split("\n") if self._run_smi("pcie.link.width.current") else []
         vram_total = self._run_smi("memory.total").split("\n") if self._run_smi("memory.total") else []
         vram_used = self._run_smi("memory.used").split("\n") if self._run_smi("memory.used") else []
         vram_free = self._run_smi("memory.free").split("\n") if self._run_smi("memory.free") else []
@@ -67,7 +83,7 @@ class GPUInfo:
         ecc_double = self._run_smi("ecc.errors.double_bit.total.volatile").split("\n") if self._run_smi("ecc.errors.double_bit.total.volatile") else []
 
         driver_info = self._run_smi("driver_version", "csv,noheader")
-        cuda_info = self._run_smi("cuda_version", "csv,noheader")
+        cuda_info = self._get_cuda_version()
 
         def safe_get(lst, idx, default="N/A"):
             try:
@@ -116,7 +132,7 @@ class GPUInfo:
 
         return {
             "driver_version": safe_get(driver_info.split("\n"), 0) if driver_info else "N/A",
-            "cuda_version": safe_get(cuda_info.split("\n"), 0) if cuda_info else "N/A",
+            "cuda_version": cuda_info,
             "gpu_count": gpu_count,
             "gpus": gpus,
             "topology": topology,

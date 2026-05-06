@@ -14,7 +14,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>H200 Test Report - {timestamp}</title>
+    <title>GPU Test Report - {timestamp}</title>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
@@ -45,7 +45,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </head>
 <body>
     <div class="header">
-        <h1>H200 Training Server Test Report</h1>
+        <h1>GPU Training Server Test Report</h1>
         <div class="meta">Generated: {timestamp} | Server: {hostname}</div>
     </div>
     {content}
@@ -67,7 +67,7 @@ class ReportGenerator:
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         if not output:
-            output = os.path.join(output_dir, f"h200_report_{timestamp}.{fmt}")
+            output = os.path.join(output_dir, f"gpu_report_{timestamp}.{fmt}")
 
         if fmt == "json":
             return self._generate_json(results, output)
@@ -119,9 +119,9 @@ class ReportGenerator:
             sections.append(
                 f'<div class="section"><h2>Memory Bandwidth</h2>'
                 f'<div class="metric"><div class="value">{mem.get("d2d_bandwidth_gbps", "N/A")} GB/s</div>'
-                f'<div class="label">D2D (HBM3e)</div></div>'
+                f'<div class="label">D2D (HBM)</div></div>'
                 f'<div class="metric"><div class="value">{mem.get("efficiency_pct", "N/A")}%</div>'
-                f'<div class="label">Efficiency vs Peak ({mem.get("peak_bandwidth_gbps", 989)} GB/s)</div></div>'
+                f'<div class="label">Efficiency vs Peak ({mem.get("peak_bandwidth_gbps", "N/A")} GB/s)</div></div>'
                 f'</div>'
             )
 

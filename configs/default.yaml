@@ -1,3 +1,6 @@
+# GPU type: auto-detect or override to h100/h200/b200/b300
+gpu_type: auto
+
 benchmark:
   memory:
     size_mb: 4096
@@ -18,10 +21,10 @@ benchmark:
 health:
   temp_warning: 80
   temp_critical: 90
-  power_limit: 700
+  power_limit: null  # null = auto-detect from GPU TDP (H100/H200: 700W, B200: 1000W, B300: 1200W)
 
 nccl:
-  min_bandwidth_gbps: 400
+  min_bandwidth_gbps: null  # null = auto-detect (40% of GPU NVLink BW)
   test_allreduce: true
   test_alltoall: true
   test_broadcast: true

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""H200 Training Server Test Suite - Main CLI Entry Point."""
+"""GPU Training Server Test Suite (H100/H200/B200/B300) - Main CLI Entry Point."""
 
 import argparse
 import json
@@ -26,6 +26,7 @@ from modules.training_sim import TrainingSim
 from modules.stress_test import StressTest
 from modules.rdma_test import RDMATest
 from modules.report import ReportGenerator
+from modules.gpu_specs import detect_gpu_type, get_gpu_specs, get_gpu_label, get_supported_gpus
 
 DEFAULT_CONFIG = {
     "benchmark": {
@@ -37,9 +38,9 @@ DEFAULT_CONFIG = {
             "iterations": 100,
         },
     },
-    "health": {"temp_warning": 80, "temp_critical": 90, "power_limit": 700},
+    "health": {"temp_warning": 80, "temp_critical": 90, "power_limit": None},
     "nccl": {
-        "min_bandwidth_gbps": 400,
+        "min_bandwidth_gbps": None,
         "test_allreduce": True,
         "test_alltoall": True,
         "test_broadcast": True,
@@ -77,8 +78,9 @@ BANNER = r"""
 [bold cyan]
 ╔══════════════════════════════════════════════════╗
 ║                                                  ║
-║       H200 Training Server Test Suite            ║
-║       GPU Diagnostics & Benchmarking Tool        ║
+║       GPU Training Server Test Suite             ║
+║       Diagnostics & Benchmarking Tool            ║
+║       Supports: H100 / H200 / B200 / B300        ║
 ║                                                  ║
 ╚══════════════════════════════════════════════════╝
 [/bold cyan]
@@ -111,6 +113,14 @@ def interactive_menu(config: dict):
     console = Console()
 
     console.print(BANNER)
+
+    gpu_type = detect_gpu_type()
+    gpu_label = get_gpu_label(gpu_type)
+    if gpu_type != "unknown":
+        console.print(f"[bold green]Detected GPU: {gpu_label} ({gpu_type.upper()})[/bold green]\n")
+    else:
+        console.print("[yellow]GPU type could not be auto-detected. Using default thresholds.[/yellow]\n")
+
     if not check_prerequisites(console):
         return
 
@@ -144,7 +154,7 @@ def interactive_menu(config: dict):
         descriptions = {
             "gpu_info": "Detect GPUs, show specs & NVLink topology",
             "health": "Temperature, power, ECC errors, PCIe, DCGM",
-            "memory_bench": "HBM3e bandwidth via nvbandwidth",
+            "memory_bench": "HBM bandwidth via nvbandwidth",
             "compute_bench": "GEMM TFLOPS across FP32/TF32/FP16/BF16/FP8",
             "nccl": "AllReduce, AllToAll, Broadcast via nccl-tests",
             "stress": "Long-running GPU stress via gpu-burn",
@@ -161,6 +171,8 @@ def interactive_menu(config: dict):
         choice = console.input("\n[bold green]Enter choice > [/bold green]").strip().lower()
 
         if choice == "q":
+            if results_store.get("tests"):
+                _save_results_prompt(results_store, config, console)
             console.print("[dim]Goodbye![/dim]")
             break
 
@@ -172,9 +184,25 @@ def interactive_menu(config: dict):
 
         result = _run_test(action, config, console)
         if result:
-            results_store["tests"][action] = result
+            if result.get("__report__"):
+                if results_store.get("tests"):
+                    rg = ReportGenerator(config)
+                    rg.generate(results_store)
+                else:
+                    console.print("[yellow]No test results to export. Run tests first.[/yellow]")
+            else:
+                results_store["tests"][action] = result
 
     return results_store
+
+
+def _save_results_prompt(results_store: dict, config: dict, console: Console):
+    if not results_store.get("tests"):
+        return
+    save = console.input("[bold green]Save results before quitting? [y/N]: [/bold green]").strip().lower()
+    if save == "y":
+        rg = ReportGenerator(config)
+        rg.generate(results_store)
 
 
 def _run_test(test_name: str, config: dict, console: Console) -> dict:
@@ -232,8 +260,7 @@ def _run_test(test_name: str, config: dict, console: Console) -> dict:
             return _run_full_suite(config, console)
 
         elif test_name == "report":
-            console.print("[yellow]No test results to export. Run tests first.[/yellow]")
-            return {}
+            return {"__report__": True}
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Test interrupted by user.[/yellow]")
@@ -287,19 +314,20 @@ def _run_full_suite(config: dict, console: Console) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="H200 Training Server Test Suite",
+        description="GPU Training Server Test Suite (H100/H200/B200/B300)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python h200_tester.py                        # Interactive menu
-  python h200_tester.py --test gpu-info        # GPU info
-  python h200_tester.py --test health           # Health check
-  python h200_tester.py --test benchmark --type memory
-  python h200_tester.py --test benchmark --type compute --dtype fp16
-  python h200_tester.py --test nccl             # NCCL test
-  python h200_tester.py --test training         # Training sim
-  python h200_tester.py --test all              # Full suite
-  python h200_tester.py --report --format json --output report.json
+   python h200_tester.py                        # Interactive menu
+   python h200_tester.py --gpu-type h200        # Override GPU type
+   python h200_tester.py --test gpu-info        # GPU info
+   python h200_tester.py --test health          # Health check
+   python h200_tester.py --test benchmark --type memory
+   python h200_tester.py --test benchmark --type compute --dtype fp16
+   python h200_tester.py --test nccl            # NCCL test
+   python h200_tester.py --test training        # Training sim
+   python h200_tester.py --test all             # Full suite
+   python h200_tester.py --report --format json --output report.json
         """,
     )
     parser.add_argument("--test", choices=["gpu-info", "health", "benchmark", "nccl", "stress", "rdma", "training", "all"],
@@ -312,14 +340,22 @@ Examples:
     parser.add_argument("--format", choices=["json", "html"], default="json", help="Report format")
     parser.add_argument("--output", default=None, help="Report output file path")
     parser.add_argument("--config", default=None, help="Path to config YAML file")
+    parser.add_argument("--gpu-type", choices=["auto", "h100", "h200", "b200", "b300"],
+                        default="auto", help="Override GPU type detection")
 
     args = parser.parse_args()
     config = load_config()
 
-    # Override config with CLI args
+    # Override config with CLI args (load before gpu_type so custom configs work)
     if args.config:
         with open(args.config) as f:
             config = yaml.safe_load(f)
+
+    # Set GPU type after config is finalized
+    if args.gpu_type and args.gpu_type != "auto":
+        config["gpu_type"] = args.gpu_type
+    else:
+        config["gpu_type"] = detect_gpu_type()
 
     console = Console()
 
@@ -357,13 +393,20 @@ Examples:
             result = bench.run_compute_benchmark(dtypes=[args.dtype] if args.dtype else None)
             Benchmark.print_results(result)
         else:
-            # Run both
             result = bench.run()
             Benchmark.print_results(result)
+        if args.report:
+            ReportGenerator(config).generate({"benchmark": result, "timestamp": datetime.now().isoformat()})
     elif args.test == "all":
-        _run_full_suite(config, console)
+        results = _run_full_suite(config, console)
+        if args.report:
+            ReportGenerator(config).generate(results)
+        has_errors = any("error" in v for v in results.values() if isinstance(v, dict))
+        sys.exit(1 if has_errors else 0)
     else:
-        _run_test(test_map[args.test], config, console)
+        result = _run_test(test_map[args.test], config, console)
+        if args.report and result:
+            ReportGenerator(config).generate({args.test: result, "timestamp": datetime.now().isoformat()})
 
 
 if __name__ == "__main__":

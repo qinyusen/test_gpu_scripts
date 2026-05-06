@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-INSTALL_DIR="${H200_TOOLS_DIR:-/opt/h200-test-tools}"
+INSTALL_DIR="${GPU_TOOLS_DIR:-${H200_TOOLS_DIR:-/opt/h200-test-tools}}"
 JOBS="${MAKE_JOBS:-$(nproc)}"
 VERBOSE="${VERBOSE:-0}"
 
@@ -171,7 +171,7 @@ check_rdma_tools() {
 print_summary() {
     echo ""
     echo "=========================================="
-    echo " H200 Test Suite - Installation Summary"
+    echo " GPU Test Suite - Installation Summary"
     echo "=========================================="
     echo ""
     echo " Install directory: $INSTALL_DIR"
@@ -211,7 +211,7 @@ print_summary() {
 main() {
     echo ""
     echo "=========================================="
-    echo " H200 Test Suite - Dependency Installer"
+    echo " GPU Test Suite - Dependency Installer"
     echo "=========================================="
     echo ""
 
